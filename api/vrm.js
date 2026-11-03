@@ -3,17 +3,19 @@ export default async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
 
   if (req.method !== "GET") {
-    return res.status(405).json({ error: "Method not allowed" });
+    return res.status(405).json({
+      error: "Method not allowed"
+    });
   }
 
   const token = process.env.VRM_ACCESS_TOKEN;
   const id = process.env.VRM_INSTALLATION_ID;
-  const password = process.env.MY_MARINE_VIEW_PASSWORD;
 
-  if (!token || !id)
-    return res.status(503).json({ error: "Server configuration incomplete" });
+  if (!token || !id) {
+    return res.status(503).json({
+      error: "Server configuration incomplete"
+    });
   }
-
 
   try {
     const response = await fetch(
@@ -21,7 +23,7 @@ export default async function handler(req, res) {
       {
         headers: {
           "x-authorization": `Token ${token}`,
-          Accept: "application/json"
+          "Accept": "application/json"
         },
         signal: AbortSignal.timeout(12000)
       }
@@ -42,6 +44,7 @@ export default async function handler(req, res) {
       fetchedAt: new Date().toISOString(),
       records: data.records ?? []
     });
+
   } catch (error) {
     return res.status(502).json({
       error: "VRM connection failed"
