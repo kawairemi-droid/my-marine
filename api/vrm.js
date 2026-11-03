@@ -10,15 +10,10 @@ export default async function handler(req, res) {
   const id = process.env.VRM_INSTALLATION_ID;
   const password = process.env.MY_MARINE_VIEW_PASSWORD;
 
-  if (!token || !id || !password) {
+  if (!token || !id)
     return res.status(503).json({ error: "Server configuration incomplete" });
   }
 
-  const supplied = req.headers["x-marine-password"];
-
-  if (typeof supplied !== "string" || supplied !== password) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
 
   try {
     const response = await fetch(
