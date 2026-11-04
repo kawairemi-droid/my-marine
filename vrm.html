@@ -1,9 +1,130 @@
-<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#10263a"><title>MY MARINE | 船内電源</title><style>
-:root{font-family:system-ui,-apple-system,sans-serif;color:#e8f4ff;background:#091927}*{box-sizing:border-box}body{margin:0}header{padding:17px;background:#10283e;border-bottom:1px solid #29475b}main{max-width:850px;margin:auto;padding:16px}a{color:#83d5ff}h1{font-size:23px;margin:12px 0 0}h2{font-size:19px;margin:0 0 12px}.panel{background:#10283a;border:1px solid #29475b;border-radius:15px;padding:16px;margin:12px 0}.vessels{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.vessel{border:1px solid #456b83;background:#17384d;color:#e8f4ff;border-radius:12px;padding:15px;text-align:left;font-size:17px;cursor:pointer}.vessel[aria-selected="true"]{border:2px solid #5dcaff;background:#1b4b69}.vessel small{display:block;font-size:12px;color:#bad4e2;margin-top:5px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.metric{padding:14px;border:1px solid #35566a;border-radius:12px;background:#193b53;min-width:0}.metric small{display:block;color:#b6d0e0}.metric strong{display:block;font-size:26px;margin-top:8px;overflow-wrap:anywhere}.muted{color:#a8c5d6;line-height:1.6;font-size:13px}button.refresh{padding:10px 15px;border:1px solid #7ebee0;border-radius:9px;background:#216a91;color:white;font-size:15px}#status{min-height:24px}#orval{display:none}.foot{font-size:12px;color:#a8c5d6;margin:16px 0}@media(max-width:400px){.metric strong{font-size:22px}.vessel{padding:11px}}
-</style></head><body><header><a href="/">← MY MARINE 海況トップ</a><h1>⚡ 船内電源モニター</h1></header><main><section class="panel"><h2>船舶を選択</h2><div class="vessels" role="tablist" aria-label="船舶"><button id="chooseCantilln" class="vessel" role="tab" aria-selected="true">CANTILLN<small>Cerbo GX / 接続対象</small></button><button id="chooseOrval" class="vessel" role="tab" aria-selected="false">ORVAL<small>ヨット / 後日接続予定</small></button></div></section><div id="cantilln"><section class="panel"><div style="display:flex;gap:10px;justify-content:space-between;align-items:center;flex-wrap:wrap"><h2>CANTILLN 電源状況</h2><button class="refresh" id="refresh">↻ 更新</button></div><p id="status" role="status" class="muted">読み込み中…</p><p class="muted" id="fetched">最終取得：—</p><div class="grid"><div class="metric"><small>バッテリー残量 SOC</small><strong id="soc">—</strong></div><div class="metric"><small>バッテリー電圧</small><strong id="batteryVoltage">—</strong></div><div class="metric"><small>バッテリー電流</small><strong id="batteryCurrent">—</strong></div><div class="metric"><small>DC電力</small><strong id="batteryPower">—</strong></div><div class="metric"><small>ソーラー発電</small><strong id="solarPower">—</strong></div><div class="metric"><small>AC入力電力</small><strong id="acInputPower">—</strong></div></div><p class="muted">— は未取得です。VRM診断値の名称や構成により表示できない項目があります。取得時刻はサーバーがVRMへ問い合わせた時刻で、機器の測定時刻とは限りません。</p></section></div><section class="panel" id="orval"><h2>ORVAL — ヨット</h2><p class="muted">後日、ORVALのGX機器とVRM Site IDを登録すると、ここにSOC・電圧・電流・DC電力・ソーラー発電・AC入力を表示します。現時点では接続せず、数値は表示しません。</p><div class="grid"><div class="metric"><small>バッテリー残量 SOC</small><strong>—</strong></div><div class="metric"><small>バッテリー電圧</small><strong>—</strong></div><div class="metric"><small>ソーラー発電</small><strong>—</strong></div><div class="metric"><small>AC入力</small><strong>—</strong></div></div></section><p class="foot">MY MARINE · Victron VRM API · 公開閲覧用の電源概要のみ。船舶操作機能はありません。</p></main><script>
-const $=id=>document.getElementById(id);const units={soc:'%',batteryVoltage:'V',batteryCurrent:'A',batteryPower:'W',solarPower:'W',acInputPower:'W'};
-function show(which){const c=which==='cantilln';$('cantilln').style.display=c?'block':'none';$('orval').style.display=c?'none':'block';$('chooseCantilln').setAttribute('aria-selected',String(c));$('chooseOrval').setAttribute('aria-selected',String(!c));}
-$('chooseCantilln').onclick=()=>show('cantilln');$('chooseOrval').onclick=()=>show('orval');
-async function load(){ $('refresh').disabled=true;$('status').textContent='VRMから取得中…';try{const r=await fetch('/api/vrm',{cache:'no-store'});const j=await r.json();if(!r.ok)throw Error(j.error||'HTTP '+r.status);for(const [k,u] of Object.entries(units)){const v=j.values?.[k];$(k).textContent=typeof v==='number'&&Number.isFinite(v)?v.toFixed(k==='batteryVoltage'?2:k==='soc'?1:0)+' '+u:'—'}$('fetched').textContent='最終取得：'+new Date(j.fetchedAt).toLocaleString('ja-JP',{timeZone:'Asia/Tokyo'})+' JST';$('status').textContent='取得成功（未対応の値は—）';}catch(e){$('status').textContent='取得失敗：'+e.message;}finally{$('refresh').disabled=false}}
-$('refresh').onclick=load;load();
-</script></body></html>
+
+const API = 'https://vrmapi.victronenergy.com/v2/installations/';
+
+const rules = [
+  ['soc', [/battery.*(state of charge|soc)/i, /^soc$/i]],
+  ['batteryVoltage', [/battery.*voltage/i]],
+  ['batteryCurrent', [/battery.*current/i]],
+  ['batteryPower', [/battery.*power/i, /^dc power$/i]],
+  ['solarPower', [/^(pv charger|solar charger).*power$/i, /^solar power$/i, /^pv power$/i]],
+  ['acInputPower', [/^ac input.*power$/i, /^grid.*power$/i]]
+];
+
+function numeric(r) {
+  const x = r.rawValue ?? r.formattedValue;
+  if (typeof x === 'number') {
+    return Number.isFinite(x) ? x : null;
+  }
+  if (typeof x === 'string') {
+    const n = Number(x.trim());
+    return x.trim() !== '' && Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+function deviceText(r) {
+  return [
+    r.Device,
+    r.device,
+    r.deviceName,
+    r.deviceType,
+    r.serviceType,
+    r.service,
+    r.instanceName
+  ].filter(x => x != null).join(' ');
+}
+
+function summarize(records) {
+  const values = {};
+  const selected = {};
+
+  for (const r of records) {
+    const name = String(r.description || '');
+    const value = numeric(r);
+    if (value === null) continue;
+
+    const device = deviceText(r);
+    const isSmartShunt = /smartshunt/i.test(device);
+    const isBatteryMonitor = /battery monitor|bmv/i.test(device);
+    const priority = isSmartShunt ? 3 : isBatteryMonitor ? 2 : 0;
+    const timestamp = Number(r.timestamp) || 0;
+
+    for (const [key, patterns] of rules) {
+      if (!patterns.some(p => p.test(name))) continue;
+
+      const batteryField = [
+        'soc',
+        'batteryVoltage',
+        'batteryCurrent'
+      ].includes(key);
+
+      if (batteryField && priority === 0) continue;
+
+      const old = selected[key];
+
+      if (
+        !old ||
+        priority > old.priority ||
+        (priority === old.priority && timestamp > old.timestamp)
+      ) {
+        values[key] = value;
+        selected[key] = { priority, timestamp };
+      }
+    }
+  }
+
+  return values;
+}
+
+export default async function handler(req, res) {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+
+  if (req.method !== 'GET') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  const token = process.env.VRM_ACCESS_TOKEN;
+  const id = process.env.VRM_INSTALLATION_ID;
+
+  if (!token || !id) {
+    return res.status(503).json({
+      error: 'VRM configuration incomplete'
+    });
+  }
+
+  try {
+    const response = await fetch(
+      `${API}${encodeURIComponent(id)}/diagnostics?count=1000`,
+      {
+        headers: {
+          'x-authorization': `Token ${token}`,
+          Accept: 'application/json'
+        },
+        signal: AbortSignal.timeout(12000)
+      }
+    );
+
+    if (!response.ok) {
+      return res.status(502).json({
+        error: 'VRM upstream error',
+        status: response.status
+      });
+    }
+
+    const json = await response.json();
+    const records = Array.isArray(json.records) ? json.records : [];
+
+    return res.status(200).json({
+      source: 'Victron VRM',
+      vessel: 'CANTILLN',
+      fetchedAt: new Date().toISOString(),
+      values: summarize(records),
+      note: 'Values are last VRM diagnostics, not guaranteed live.'
+    });
+  } catch (e) {
+    return res.status(502).json({
+      error: 'VRM connection failed'
+    });
+  }
+}
