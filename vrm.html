@@ -16,64 +16,62 @@ function numeric(r) {
     return Number.isFinite(x) ? x : null;
   }
   if (typeof x === 'string') {
-    const n = Number(x.trim());
-    return x.trim() !== '' && Number.isFinite(n) ? n : null;
+    const match = x.trim().match(/^([-+]?\d+(?:\.\d+)?)/);
+    return match ? Number(match[1]) : null;
   }
   return null;
 }
 
-function deviceText(r) {
-  return [
-    r.Device,
-    r.device,
-    r.deviceName,
-    r.deviceType,
-    r.serviceType,
-    r.service,
-    r.instanceName
-  ].filter(x => x != null).join(' ');
-}
-
 function summarize(records) {
   const values = {};
-  const selected = {};
+  const latest = {};
 
   for (const r of records) {
     const name = String(r.description || '');
     const value = numeric(r);
     if (value === null) continue;
 
-    const device = deviceText(r);
-    const isSmartShunt = /smartshunt/i.test(device);
-    const isBatteryMonitor = /battery monitor|bmv/i.test(device);
-    const priority = isSmartShunt ? 3 : isBatteryMonitor ? 2 : 0;
-    const timestamp = Number(r.timestamp) || 0;
-
     for (const [key, patterns] of rules) {
       if (!patterns.some(p => p.test(name))) continue;
 
-      const batteryField = [
-        'soc',
-        'batteryVoltage',
-        'batteryCurrent'
-      ].includes(key);
-
-      if (batteryField && priority === 0) continue;
-
-      const old = selected[key];
-
-      if (
-        !old ||
-        priority > old.priority ||
-        (priority === old.priority && timestamp > old.timestamp)
-      ) {
+      const ts = Number(r.timestamp) || 0;
+      if (latest[key] === undefined || ts > latest[key]) {
         values[key] = value;
-        selected[key] = { priority, timestamp };
+        latest[key] = ts;
       }
     }
   }
 
+  // Prevent displaying an unverified SOC or battery voltage.
+  delete values.soc;
+  delete values.batteryVoltage;
+  delete values.batteryCurrent;
+
   return values;
+}
+
+function diagnosticSummary(records) {
+  return records
+    .filter(r => {
+      const name = String(r.description || '');
+      const device = String(r.Device || '');
+      const service = String(r.dbusServiceType || '');
+
+      return /battery|soc|state of charge|shunt/i.test(
+        [name, device, service].join(' ')
+      );
+    })
+    .map(r => ({
+      Device: String(r.Device ?? '').slice(0, 80),
+      instance: r.instance ?? null,
+      code: String(r.code ?? '').slice(0, 40),
+      description: String(r.description ?? '').slice(0, 100),
+      dbusServiceType: String(r.dbusServiceType ?? '').slice(0, 60),
+      dbusPath: String(r.dbusPath ?? '').slice(0, 100),
+      value: numeric(r),
+      timestamp: r.timestamp ?? null
+    }))
+    .slice(0, 150);
 }
 
 export default async function handler(req, res) {
@@ -81,7 +79,9 @@ export default async function handler(req, res) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
 
   if (req.method !== 'GET') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    return res.status(405).json({
+      error: 'Method not allowed'
+    });
   }
 
   const token = process.env.VRM_ACCESS_TOKEN;
@@ -113,15 +113,27 @@ export default async function handler(req, res) {
     }
 
     const json = await response.json();
-    const records = Array.isArray(json.records) ? json.records : [];
+    const records = Array.isArray(json.records)
+      ? json.records
+      : [];
+
+    // Diagnostic information stays in server logs.
+    // Enable temporarily in Vercel with VRM_DEBUG=true.
+    if (process.env.VRM_DEBUG === 'true') {
+      console.log(
+        'MY_MARINE_BATTERY_DIAGNOSTICS',
+        JSON.stringify(diagnosticSummary(records))
+      );
+    }
 
     return res.status(200).json({
       source: 'Victron VRM',
       vessel: 'CANTILLN',
       fetchedAt: new Date().toISOString(),
       values: summarize(records),
-      note: 'Values are last VRM diagnostics, not guaranteed live.'
+      note: 'Battery values are hidden until their source is verified.'
     });
+
   } catch (e) {
     return res.status(502).json({
       error: 'VRM connection failed'
